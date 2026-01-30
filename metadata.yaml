@@ -1,5 +1,5 @@
-name: helloworld # 这是你的插件的唯一识别名。
-desc: 这是 AstrBot 的默认插件，支持关键词回复。 # 插件简短描述
-version: v1.3 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: ImgBB_Subscriber # 这是你的插件的唯一识别名。
+desc: 这是一个用于AstrBot的插件，允许用户抓取指定 ImgBB 用户的公开相册图片，支持订阅用户、随机抓取、以及通过 Cookie 访问受限内容。 # 插件简短描述
+version: v1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+author: FGXYX # 作者
+repo: https://github.com/FGXYX/astrbot_plugin_ImgBB_Subscriber # 插件的仓库地址
