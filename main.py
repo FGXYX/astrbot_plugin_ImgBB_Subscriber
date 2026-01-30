@@ -9,6 +9,7 @@ import ssl
 import shutil
 import logging
 from urllib.parse import urljoin, urlparse
+from bs4 import BeautifulSoup
 
 from astrbot.api.all import Context, Star, register, AstrMessageEvent
 from astrbot.api.event import filter
