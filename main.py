@@ -1,233 +1,233 @@
-import aiohttp
 import asyncio
 import base64
 import json
 import os
 import random
-import re
 import ssl
-import shutil
-import logging
+import re
 from urllib.parse import urljoin, urlparse
+from pathlib import Path
+
+import aiohttp
 from bs4 import BeautifulSoup
 
 from astrbot.api.all import Context, Star, register, AstrMessageEvent
 from astrbot.api.event import filter
 from astrbot.api.message_components import Image, Plain
 
-
-@register("ImgBB_Subscriber", "FGXYX", "ImgBB助手", "1.0.0")
+@register("ImgBB_Subscriber", "FGXYX", "ImgBB助手", "1.1.0")
 class ImgBBPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
+        self.logger = self.context.logger  # 符合框架规范：使用上下文日志器
 
         # ==========================================
-        # 1. 配置日志系统
+        # 1. 路径定义 (使用 Path 对象更现代化)
         # ==========================================
-        self.logger = logging.getLogger("astrbot.plugin.imgbb")
-        # 清除可能存在的旧 filter 防止重复叠加
-        for f in list(self.logger.filters):
-            if isinstance(f, AstrBotLogFilter):
-                self.logger.removeFilter(f)
-
-        # 添加补全过滤器，传入插件名和版本号
-        # 这样日志就会显示为 [ImgBB] [INFO] [v3.2.4] ...
-        self.logger.addFilter(AstrBotLogFilter("ImgBB", "v3.2.4"))
-
+        # 尝试使用插件目录下的 data 文件夹，或者遵循框架的数据目录
+        self.plugin_dir = Path(__file__).parent
+        self.data_file = self.plugin_dir / "data.json"
+        
         # ==========================================
-        # 2. 路径定义 (数据与代码分离)
-        # ==========================================
-        root_dir = os.getcwd()
-        self.save_dir = os.path.join(root_dir, "data", "plugin_data", "astrbot_plugin_ImgBB_Subscriber")
-        self.data_path = os.path.join(self.save_dir, "data.json")
-        self.old_data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
-
-        # ==========================================
-        # 3. 初始化与数据迁移
+        # 2. 初始化并发锁
         # ==========================================
         self.data_lock = asyncio.Lock()
-        self._init_storage()
-        self.data = self._load_data()
+        self.data = {}
+        
+        # 异步初始化数据加载（在插件生命周期开始时）
+        # 注意：构造函数中不能直接 await，这里先加载一个空壳或同步加载
+        self._load_data_sync()
 
-    def _init_storage(self):
-        """初始化存储目录并执行迁移"""
-        # 1. 确保新目录存在
-        if not os.path.exists(self.save_dir):
+    def _load_data_sync(self):
+        """同步加载数据（仅初始化使用）"""
+        if not self.data_file.exists():
+            self._save_data_internal({"subs": {}})
+            self.data = {"subs": {}}
+        else:
             try:
-                os.makedirs(self.save_dir)
-                self.logger.info(f"创建数据目录: {self.save_dir}")
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    self.data = json.load(f)
             except Exception as e:
-                self.logger.error(f"创建数据目录失败: {e}")
+                self.logger.error(f"数据文件损坏，已重置: {e}")
+                self.data = {"subs": {}}
 
-        # 2. 检测是否需要迁移
-        if not os.path.exists(self.data_path) and os.path.exists(self.old_data_path):
-            self.logger.warning("检测到旧版数据文件，正在迁移至 data/plugin_data/ ...")
+    async def _save_data(self):
+        """异步保存数据（运行时使用，带锁）"""
+        async with self.data_lock:
             try:
-                shutil.copy2(self.old_data_path, self.data_path)
-                self.logger.info(f"✅ 数据迁移成功！新路径: {self.data_path}")
-                os.rename(self.old_data_path, self.old_data_path + ".bak")
+                # 运行在线程池中避免阻塞事件循环
+                await asyncio.to_thread(self._save_data_internal, self.data)
             except Exception as e:
-                self.logger.error(f"❌ 数据迁移失败: {e}，将使用空数据初始化。")
+                self.logger.error(f"保存数据失败: {e}")
 
-    def _load_data(self):
-        if not os.path.exists(self.data_path):
-            with open(self.data_path, 'w', encoding='utf-8') as f:
-                json.dump({"subs": {}}, f)
-            return {"subs": {}}
-        try:
-            with open(self.data_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            self.logger.error(f"加载数据失败: {e}")
-            return {"subs": {}}
+    def _save_data_internal(self, data):
+        """底层保存逻辑"""
+        with open(self.data_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
-    def _save_data_sync(self, data):
-        """同步保存 (初始化用)"""
+    # ==========================
+    #  网络请求封装 (核心健壮性层)
+    # ==========================
+    async def _request(self, method: str, url: str, **kwargs):
+        """统一的网络请求封装，处理代理、SSL、超时"""
+        proxy = self.config.get("http_proxy")
+        # 设置默认超时为 15 秒
+        timeout = aiohttp.ClientTimeout(total=kwargs.pop('timeout', 15))
+        
+        # 修正 SSL 问题：aiohttp 不支持 verify_ssl 参数
+        ssl_ctx = ssl.create_default_context()
+        if not kwargs.pop('verify_ssl', True):
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+        
         try:
-            with open(self.data_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.request(
+                    method, 
+                    url, 
+                    proxy=proxy, 
+                    ssl=ssl_ctx, 
+                    **kwargs
+                ) as resp:
+                    if resp.status != 200:
+                        return None, f"HTTP {resp.status}"
+                    # 针对图片下载，返回 bytes；针对 API，返回 json；针对网页，返回 text
+                    if kwargs.get('expect_bytes'):
+                        return await resp.read(), "success"
+                    elif kwargs.get('expect_json'):
+                        return await resp.json(), "success"
+                    else:
+                        return await resp.text(), "success"
+        except asyncio.TimeoutError:
+            return None, "请求超时"
         except Exception as e:
-            self.logger.error(f"数据写入失败: {e}")
+            self.logger.error(f"网络请求异常 [{url}]: {e}")
+            return None, f"网络错误: {str(e)}"
 
     # ==========================
     #  功能模块 1: 图片上传
     # ==========================
-    @filter.command("up")
+    @filter.command("upload") # 修正：指令与描述一致
     async def upload_image(self, event: AstrMessageEvent):
         '''上传图片到 ImgBB'''
         api_key = self.config.get("api_key")
         if not api_key:
-            yield event.plain_result("❌ 未配置 API Key！请在插件配置中填写。")
+            yield event.plain_result("❌ 未配置 API Key！")
             return
 
-        # 1. 寻找图片
-        target_img = None
-        for component in event.message_obj.message:
-            if isinstance(component, Image):
-                target_img = component
-                break
-
+        target_img = next((c for c in event.message_obj.message if isinstance(c, Image)), None)
         if not target_img:
-            yield event.plain_result("❌ 请在发送图片时附带 `/upload` 命令。")
+            yield event.plain_result("❌ 请在发送图片时附带 `/upload` 命令")
             return
 
         yield event.plain_result("☁️ 正在上传...")
 
-        # 2. 下载并处理
-        try:
-            img_data = await self._download_image(target_img)
-            if not img_data:
-                yield event.plain_result("❌ 图片下载失败 (请检查代理设置)")
-                return
-            b64_data = base64.b64encode(img_data).decode('utf-8')
-        except Exception as e:
-            yield event.plain_result(f"❌ 处理出错: {e}")
+        # 1. 下载图片
+        if target_img.path and os.path.exists(target_img.path):
+             with open(target_img.path, "rb") as f:
+                 img_bytes = f.read()
+        elif target_img.url:
+             img_bytes, msg = await self._request("GET", target_img.url, expect_bytes=True)
+             if not img_bytes:
+                 yield event.plain_result(f"❌ 图片下载失败: {msg}")
+                 return
+        else:
+            yield event.plain_result("❌ 无法获取图片数据")
             return
 
-        # 3. 上传到 API
-        try:
-            url = "https://api.imgbb.com/1/upload"
-            payload = {"key": api_key, "image": b64_data}
-            proxy = self.config.get("http_proxy")
+        # 2. 上传图片
+        b64_data = base64.b64encode(img_bytes).decode('utf-8')
+        payload = {"key": api_key, "image": b64_data}
+        
+        res_data, msg = await self._request(
+            "POST", 
+            "https://api.imgbb.com/1/upload", 
+            data=payload, 
+            expect_json=True
+        )
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=payload, proxy=proxy) as resp:
-                    res_json = await resp.json()
-
-                    if resp.status == 200 and res_json.get("success"):
-                        data = res_json["data"]
-                        img_url = data["url"]
-                        msg = [
-                            Plain("✅ **上传成功！**\n"),
-                            Plain(f"🔗 **直链**: {img_url}\n"),
-                            Plain(f"Markdown: `![]({img_url})`")
-                        ]
-                        yield event.chain_result(msg)
-                    else:
-                        err = res_json.get("error", {}).get("message", "未知错误")
-                        yield event.plain_result(f"❌ ImgBB 报错: {err}")
-        except Exception as e:
-            yield event.plain_result(f"❌ 上传请求失败: {e}")
-
-    async def _download_image(self, img_component: Image):
-        if img_component.path and os.path.exists(img_component.path):
-            with open(img_component.path, "rb") as f:
-                return f.read()
-        if img_component.url:
-            proxy = self.config.get("http_proxy")
-            async with aiohttp.ClientSession() as session:
-                async with session.get(img_component.url, proxy=proxy) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-        return None
+        if res_data and res_data.get("success"):
+            img_url = res_data["data"]["url"]
+            yield event.chain_result([
+                Plain("✅ **上传成功！**\n"),
+                Plain(f"🔗 直链: {img_url}\n"),
+                Plain(f"Markdown: `![]({img_url})`")
+            ])
+        else:
+            err_msg = res_data.get("error", {}).get("message", "未知错误") if res_data else msg
+            yield event.plain_result(f"❌ 上传失败: {err_msg}")
 
     # ==========================
-    #  功能模块 2: 订阅与抓取
+    #  功能模块 2: 订阅与抓取 (重构版)
     # ==========================
     async def _fetch_user_images(self, username):
         count = self.config.get("fetch_count", 1)
-        proxy = self.config.get("http_proxy")
-        cookie = self.config.get("cookie")
-        url = f"https://{username}.imgbb.com/"
+        base_url = f"https://{username}.imgbb.com/"
+        
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-        if cookie:
-            headers["Cookie"] = cookie
+        # 安全处理 Cookie
+        if self.config.get("cookie"):
+            headers["Cookie"] = self.config.get("cookie").strip()
 
-        try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, proxy=proxy, verify_ssl=False) as resp:
-                    if resp.status != 200:
-                        return None, f"HTTP {resp.status}"
-                    html = await resp.text()
+        # 1. 获取相册页面
+        html, msg = await self._request("GET", base_url, headers=headers)
+        if not html:
+            return None, msg
 
-                soup = BeautifulSoup(html, 'html.parser')
-                links = soup.find_all('a', class_='image-container')
+        # 2. 解析链接
+        viewer_urls = self._parse_gallery_links(html, base_url)
+        if not viewer_urls:
+            return None, "未找到图片 (可能是私有相册或 Cookie 失效)"
 
-                viewer_urls = []
-                for a in links:
-                    href = a.get('href')
-                    if href:
-                        viewer_urls.append(urljoin(base_url, href))
+        # 3. 随机采样
+        selected_urls = random.sample(viewer_urls, min(len(viewer_urls), count))
+        
+        # 4. 解析直链 (可选)
+        results = []
+        need_direct = self.config.get("return_type", 3) in [1, 3]
+        
+        for v_url in selected_urls:
+            d_url = None
+            if need_direct:
+                d_url = await self._resolve_direct_image(v_url, headers)
+            results.append({"viewer_url": v_url, "direct_url": d_url})
+            
+        return results, "success"
 
-                if not viewer_urls:
-                    matches = re.findall(r'https://ibb\.co/[a-zA-Z0-9]{5,}', html)
-                    viewer_urls = list(set(matches))
+    def _parse_gallery_links(self, html, base_url):
+        """纯逻辑：解析 HTML 中的链接"""
+        soup = BeautifulSoup(html, 'html.parser')
+        links = set()
+        
+        # 策略 A: 解析 a.image-container
+        for a in soup.find_all('a', class_='image-container'):
+            href = a.get('href')
+            if href:
+                links.add(urljoin(base_url, href))
+        
+        # 策略 B: 正则兜底
+        if not links:
+            matches = re.findall(r'https://ibb\.co/[a-zA-Z0-9]{3,}', html)
+            links.update(matches)
+            
+        return list(links)
 
-                if not viewer_urls:
-                    return None, "未找到图片"
-
-                selected_urls = random.sample(viewer_urls, min(len(viewer_urls), count))
-                results = []
-                r_type = self.config.get("return_type", 3)
-                need_direct = r_type in [1, 3]
-
-                for v_url in selected_urls:
-                    d_url = None
-                    if need_direct:
-                        d_url = await self._get_direct_image(session, v_url, proxy)
-                    results.append({"viewer_url": v_url, "direct_url": d_url})
-
-                return results, "success"
-        except Exception as e:
-            self.logger.error(f"抓取错误: {e}")
-            return None, "内部错误"
-
-    async def _get_direct_image(self, session, viewer_url, proxy):
-        try:
-            async with session.get(viewer_url, proxy=proxy, verify_ssl=False) as resp:
-                if resp.status != 200:
-                    return None
-                html = await resp.text()
-                soup = BeautifulSoup(html, 'html.parser')
-                meta = soup.find("meta", property="og:image")
-                if meta:
-                    return meta["content"]
-                return None
-        except:
+    async def _resolve_direct_image(self, viewer_url, headers):
+        """解析单页获取直链 (带 SSRF 防护)"""
+        # SSRF 防护: 简单白名单
+        domain = urlparse(viewer_url).netloc
+        if "ibb.co" not in domain and "imgbb.com" not in domain:
             return None
+
+        html, _ = await self._request("GET", viewer_url, headers=headers)
+        if not html: return None
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        meta = soup.find("meta", property="og:image")
+        return meta["content"] if meta else None
 
     async def _send_result(self, event, results, username):
         r_type = self.config.get("return_type", 3)
@@ -237,25 +237,28 @@ class ImgBBPlugin(Star):
             v_url = item["viewer_url"]
             d_url = item["direct_url"]
 
-            if r_type == 1:
+            if r_type == 1: # 仅图片
                 if d_url:
                     chain.append(Image.fromURL(d_url))
                 else:
-                    chain.append(Plain(f"[解析失败] {v_url}\n"))
-            elif r_type == 2:
+                    chain.append(Plain(f"[解析直链失败] {v_url}\n"))
+            elif r_type == 2: # 仅链接
                 chain.append(Plain(f"🔗 {v_url}\n"))
-            else:
+            else: # 图+链
                 if d_url:
                     chain.append(Image.fromURL(d_url))
                 chain.append(Plain(f"🔗 {v_url}\n"))
 
         yield event.chain_result(chain)
 
+    # ==========================
+    #  指令集
+    # ==========================
     @filter.command("imgbb_get")
     async def get_user_img(self, event: AstrMessageEvent, username: str):
-        '''根据作者来获取图片'''
+        '''抓取指定用户的图片'''
         count = self.config.get("fetch_count", 1)
-        yield event.plain_result(f"🔍 正在抓取 {username} 的 {count} 张图片...")
+        yield event.plain_result(f"🔍 正在抓取 {username}...")
         results, msg = await self._fetch_user_images(username)
         if not results:
             yield event.plain_result(f"❌ 失败: {msg}")
@@ -265,51 +268,12 @@ class ImgBBPlugin(Star):
 
     @filter.command("imgbb_rand")
     async def get_sub_rand(self, event: AstrMessageEvent):
-        '''从订阅列表中随机获取图片'''
-        chat_id = event.get_sender_id()
+        '''随机抓取订阅用户的图片'''
+        # 强制转换为 str，防止 int/str 键名混淆
+        chat_id = str(event.get_sender_id())
         subs = self.data["subs"].get(chat_id, [])
         if not subs:
-            yield event.plain_result("❌ 无订阅")
+            yield event.plain_result("❌ 当前无订阅")
             return
         lucky_user = random.choice(subs)
         yield event.plain_result(f"🎲 选中: {lucky_user}")
-        results, msg = await self._fetch_user_images(lucky_user)
-        if not results:
-            yield event.plain_result(f"❌ 失败: {msg}")
-        else:
-            async for msg in self._send_result(event, results, lucky_user):
-                yield msg
-
-    @filter.command("imgbb_sub")
-    async def subscribe(self, event: AstrMessageEvent, username: str):
-        '''订阅ImgBB作者'''
-        chat_id = event.get_sender_id()
-        if chat_id not in self.data["subs"]:
-            self.data["subs"][chat_id] = []
-        if username not in self.data["subs"][chat_id]:
-            self.data["subs"][chat_id].append(username)
-            self._save_data()
-        yield event.plain_result(f"✅ 已订阅 {username}")
-
-    @filter.command("imgbb_unsub")
-    async def unsubscribe(self, event: AstrMessageEvent, username: str):
-        '''取消订阅'''
-        chat_id = event.get_sender_id()
-        subs = self.data["subs"].get(chat_id, [])
-        if username in subs:
-            subs.remove(username)
-            self._save_data()
-            yield event.plain_result(f"✅ 已取订 {username}")
-        else:
-            yield event.plain_result("❌ 未订阅")
-
-    @filter.command("imgbb_list")
-    async def list_subs(self, event: AstrMessageEvent):
-        '''查看订阅列表'''
-        chat_id = event.get_sender_id()
-        subs = self.data["subs"].get(chat_id, [])
-        if subs:
-            msg = ["📋 订阅列表"] + [f"- {u}" for u in subs]
-            yield event.plain_result("\n".join(msg))
-        else:
-            yield event.plain_result("📭 无订阅")
