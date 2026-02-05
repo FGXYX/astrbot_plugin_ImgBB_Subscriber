@@ -1,0 +1,28 @@
+{
+    "api_key": {
+        "type": "string",
+        "description": "ImgBB API Key (可选，用于上传)",
+        "default": "d0fb9ea9a79b2fb560074637eec330b5"
+    },
+    "fetch_count": {
+        "type": "int",
+        "description": "每次抓取图片的数量 (1-9)",
+        "default": 3
+    },
+    "return_type": {
+        "type": "int",
+        "description": "返还类型 (1:仅图片, 2:仅链接, 3:图片+链接)",
+        "enum": [1, 2, 3],
+        "default": 3
+    },
+    "http_proxy": {
+        "type": "string",
+        "description": "HTTP 代理地址 (例如 http://127.0.0.1:7890)",
+        "default": "http://127.0.0.1:7897"
+    },
+    "cookie": {
+        "type": "string",
+        "description": "ImgBB Cookie (用于抓取需登录的相册)",
+        "default": "PHPSESSID=7ieo16pibvfh5jp18m7a5pm8vf; LID=4qWm14SGyTs5JxjZfmRnXqWsd2VwmRpb0pyy9n3693HQ2N6R; USER_SELECTED_EMBED=html-embed-thumbnail"
+    }
+}
