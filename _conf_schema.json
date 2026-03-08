@@ -1,28 +1,45 @@
 {
-    "api_key": {
-        "type": "string",
-        "description": "ImgBB API Key (可选，用于上传)",
-        "default": "d0fb9ea9a79b2fb560074637eec330b5"
-    },
-    "fetch_count": {
-        "type": "int",
-        "description": "每次抓取图片的数量 (1-9)",
-        "default": 3
-    },
-    "return_type": {
-        "type": "int",
-        "description": "返还类型 (1:仅图片, 2:仅链接, 3:图片+链接)",
-        "enum": [1, 2, 3],
-        "default": 3
-    },
-    "http_proxy": {
-        "type": "string",
-        "description": "HTTP 代理地址 (例如 http://127.0.0.1:7890)",
-        "default": "http://127.0.0.1:7897"
-    },
-    "cookie": {
-        "type": "string",
-        "description": "ImgBB Cookie (用于抓取需登录的相册)",
-        "default": "PHPSESSID=7ieo16pibvfh5jp18m7a5pm8vf; LID=4qWm14SGyTs5JxjZfmRnXqWsd2VwmRpb0pyy9n3693HQ2N6R; USER_SELECTED_EMBED=html-embed-thumbnail"
-    }
+  "api_key": {
+    "type": "string",
+    "title": "ImgBB API Key",
+    "description": "ImgBB API Key (可选，用于上传图片)",
+    "default": ""
+  },
+  "fetch_count": {
+    "type": "int",
+    "title": "抓取数量",
+    "description": "每次抓取图片的数量 (1-9)",
+    "default": 3
+  },
+  "max_pages": {
+    "type": "int",
+    "title": "最大页面深度",
+    "description": "抓取图片的页面深度 (1-9)，防无限循环",
+    "default": 5
+  },
+"max_albums": {
+    "type": "int",
+    "title": "随机相册数",
+    "description": "随机选几个相册抓取 (1-5，防请求过多)",
+    "default": 1
+  },
+  "return_type": {
+    "type": "int",
+    "title": "返回类型",
+    "description": "1: 仅图片, 2: 仅链接, 3: 图片+链接",
+    "enum": [1, 2, 3],
+    "default": 3
+  },
+  "http_proxy": {
+    "type": "string",
+    "title": "HTTP 代理",
+    "description": "HTTP 代理地址 (例如 http://127.0.0.1:7897)",
+    "default": "http://127.0.0.1:7897"
+  },
+  "cookie": {
+    "type": "string",
+    "title": "ImgBB Cookie",
+    "description": "ImgBB Cookie (用于抓取需登录的相册，建议从浏览器复制完整 Cookie)",
+    "default": ""
+  }
 }
