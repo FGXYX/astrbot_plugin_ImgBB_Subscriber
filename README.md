@@ -96,9 +96,9 @@ data/config/plugin_config/imgbb_subscriber_config.json
 
 | 指令         | 参数     | 说明                              | 示例                   |
 |--------------|----------|-----------------------------------|------------------------|
-| /imgbb_get   | <用户名> | 随机抓取指定用户的图片            | /imgbb_get <username>       |
+| /imgbb_get   | <用户名> | 随机抓取指定用户的图片            | /imgbb_get username       |
 | /imgbb_sub   | <用户名> | 订阅指定用户到你的列表            | /imgbb_sub        |
-| /imgbb_unsub | <用户名> | 取消订阅                          | /imgbb_unsub <username>     |
+| /imgbb_unsub | <用户名> | 取消订阅                          | /imgbb_unsub username     |
 | /imgbb_rand  | 无       | 从订阅列表随机挑选一位用户并抓图  | /imgbb_rand            |
 | /imgbb_list  | 无       | 查看当前订阅列表                  | /imgbb_list            |
 | /upload| `[图片]` | 发送图片时配文使用，将图片上传到 ImgBB 并返回直链。 | `[图片] /upload` |
