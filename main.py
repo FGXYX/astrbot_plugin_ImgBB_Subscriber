@@ -20,9 +20,9 @@ from astrbot.api.message_components import Image, Plain, File
 
 @register("ImgBB_Subscriber", "FGXYX", "ImgBB助手", "1.1.0")
 class ImgBBPlugin(Star):
-    def __init__(self, context: Context, config: dict):
+    def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
-        self.config = config
+        self.config = config or {}
 
         # 插件代码目录（可被更新覆盖）
         self.plugin_dir = Path(__file__).parent
